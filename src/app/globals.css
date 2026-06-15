@@ -1,26 +1,55 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ── Tokens de couleur & typographie ───────────────────────────────────────── */
+@theme {
+  /* Neutrals: ink-0 (fond le plus sombre) → ink-4 (texte le plus clair) */
+  --color-ink-0: oklch(0.12 0.005 265);
+  --color-ink-1: oklch(0.18 0.007 265);
+  --color-ink-2: oklch(0.28 0.008 265);
+  --color-ink-3: oklch(0.52 0.010 265);
+  --color-ink-4: oklch(0.92 0.005 265);
+
+  /* Accent vert/teal */
+  --color-accent:       oklch(0.72 0.15 165);
+  --color-accent-dim:   oklch(0.55 0.12 165);
+  --color-accent-glow:  oklch(0.82 0.12 165);
+
+  /* Sémantiques */
+  --color-ok:     oklch(0.70 0.15 145);
+  --color-warn:   oklch(0.75 0.14  70);
+  --color-danger: oklch(0.65 0.20  25);
+
+  /* Polices */
+  --font-display: var(--font-fraunces);
+  --font-sans:    var(--font-geist-sans);
+  --font-mono:    var(--font-geist-mono);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* ── Base ───────────────────────────────────────────────────────────────────── */
+@layer base {
+  html {
+    color-scheme: dark;
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    background-color: var(--color-ink-0);
+    color: var(--color-ink-4);
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Police display pour tous les titres */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display), ui-serif, Georgia, serif;
+    font-variant-ligatures: common-ligatures;
+    font-optical-sizing: auto;
+  }
+
+  /* Monospace + chiffres tabulaires pour les valeurs numériques */
+  [data-numeric],
+  .font-numeric {
+    font-family: var(--font-mono), ui-monospace, "Cascadia Code", monospace;
+    font-variant-numeric: tabular-nums;
+  }
 }

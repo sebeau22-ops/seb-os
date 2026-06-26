@@ -52,7 +52,11 @@ export default function Panel({
         .join(' ')}
     >
       {hasHeader && (
-        <SectionHeader index={index} title={title} meta={meta} />
+        <SectionHeader
+          {...(index !== undefined && { index })}
+          {...(title  !== undefined && { title })}
+          {...(meta   !== undefined && { meta })}
+        />
       )}
       {children}
     </div>

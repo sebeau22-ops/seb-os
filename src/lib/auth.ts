@@ -5,8 +5,9 @@ export const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 jours
 
 // ── Helpers base64url ────────────────────────────────────────────────────────
 
-function toB64url(buf: ArrayBuffer): string {
-  return btoa(String.fromCharCode(...new Uint8Array(buf)))
+function toB64url(buf: ArrayBuffer | Uint8Array): string {
+  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  return btoa(String.fromCharCode(...bytes))
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '');
@@ -53,7 +54,7 @@ export async function verifySession(token: string, secret: string): Promise<bool
   }
   const key = await importHmacKey(secret, ['verify']);
   try {
-    return await crypto.subtle.verify('HMAC', key, sig, new TextEncoder().encode(payload));
+    return await crypto.subtle.verify('HMAC', key, sig.buffer as ArrayBuffer, new TextEncoder().encode(payload));
   } catch {
     return false;
   }

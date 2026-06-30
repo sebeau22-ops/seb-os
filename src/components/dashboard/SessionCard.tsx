@@ -9,10 +9,15 @@ function greeting(hour: number): string {
   return 'Bonsoir';
 }
 
-export default function SessionCard() {
+type Props = { initialPriority: string };
+
+export default function SessionCard({ initialPriority }: Props) {
   const [time, setTime]         = useState('--:--:--');
   const [salut, setSalut]       = useState('Bonjour');
   const [dateLong, setDateLong] = useState('');
+  const [priority, setPriority] = useState(initialPriority);
+  const [saved, setSaved]       = useState(false);
+  const [saving, setSaving]     = useState(false);
 
   useEffect(() => {
     const update = () => {
@@ -32,6 +37,24 @@ export default function SessionCard() {
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
   }, []);
+
+  async function savePriority() {
+    if (!priority.trim()) return;
+    setSaving(true);
+    try {
+      await fetch('/api/daily', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ priority: priority.trim() }),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      console.error('[SessionCard] savePriority:', err);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <Panel index="02" title="SESSION">
@@ -57,19 +80,29 @@ export default function SessionCard() {
             htmlFor="priority-input"
             className="font-mono text-[9px] text-ink-3 tracking-widest uppercase"
           >
-            Aujourd'hui je vais
+            Aujourd&apos;hui je vais
           </label>
           <textarea
             id="priority-input"
             rows={2}
+            value={priority}
+            onChange={(e) => setPriority(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                e.preventDefault();
+                void savePriority();
+              }
+            }}
             placeholder="Définis ta priorité du jour…"
             className="w-full rounded-lg bg-ink-0 border border-ink-2 px-3 py-2.5 text-sm text-ink-4 placeholder:text-ink-3 resize-none outline-none focus:border-accent transition-colors"
           />
           <button
             type="button"
-            className="self-start font-mono text-[10px] tracking-widest uppercase px-4 py-2 rounded-lg bg-accent/15 text-accent border border-accent/30 hover:bg-accent/25 transition-colors"
+            onClick={() => void savePriority()}
+            disabled={saving || !priority.trim()}
+            className="self-start font-mono text-[10px] tracking-widest uppercase px-4 py-2 rounded-lg bg-accent/15 text-accent border border-accent/30 hover:bg-accent/25 transition-colors disabled:opacity-40"
           >
-            Capture
+            {saved ? '✓ SAUVEGARDÉ' : saving ? 'SAUVEGARDE…' : 'SAUVEGARDER'}
           </button>
         </div>
       </div>

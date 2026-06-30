@@ -11,24 +11,35 @@ type Habit = {
 };
 
 const HABITS: Habit[] = [
-  { id: 'lever',   label: 'Lever tôt',      category: 'ROUTINE',       target: 1 },
-  { id: 'med',     label: 'Méditation',      category: 'SANTÉ',         target: 1 },
-  { id: 'sport',   label: 'Exercice',        category: 'SANTÉ',         target: 3 },
-  { id: 'eau',     label: 'Eau 2 L',         category: 'NUTRITION',     target: 1 },
-  { id: 'lecture', label: 'Lecture',         category: 'DÉVELOPPEMENT', target: 1 },
-  { id: 'journal', label: 'Journalisation',  category: 'ROUTINE',       target: 1 },
+  { id: 'lever',   label: 'Lever tôt',     category: 'ROUTINE',       target: 1 },
+  { id: 'med',     label: 'Méditation',     category: 'SANTÉ',         target: 1 },
+  { id: 'sport',   label: 'Exercice',       category: 'SANTÉ',         target: 3 },
+  { id: 'eau',     label: 'Eau 2 L',        category: 'NUTRITION',     target: 1 },
+  { id: 'lecture', label: 'Lecture',        category: 'DÉVELOPPEMENT', target: 1 },
+  { id: 'journal', label: 'Journalisation', category: 'ROUTINE',       target: 1 },
 ];
 
-export default function HabitsCard() {
-  const [checked, setChecked] = useState<Set<string>>(new Set());
+type Props = { initialHabits: string[] };
 
-  const toggle = (id: string) =>
-    setChecked((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+export default function HabitsCard({ initialHabits }: Props) {
+  const [checked, setChecked] = useState<Set<string>>(new Set(initialHabits));
+
+  async function toggle(id: string) {
+    const next = new Set(checked);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setChecked(next);
+
+    try {
+      await fetch('/api/daily', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ habits: Array.from(next) }),
+      });
+    } catch (err) {
+      console.error('[HabitsCard] toggle:', err);
+    }
+  }
 
   const done  = checked.size;
   const total = HABITS.length;
@@ -62,7 +73,7 @@ export default function HabitsCard() {
               <button
                 key={h.id}
                 type="button"
-                onClick={() => toggle(h.id)}
+                onClick={() => void toggle(h.id)}
                 className={[
                   'rounded-lg px-3 py-2 text-left border transition-colors',
                   active

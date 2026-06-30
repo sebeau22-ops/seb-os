@@ -1,6 +1,11 @@
 import Panel from './Panel';
 
-export default function OperatorCard() {
+type Props = {
+  focus:  string | null;
+  streak: number;
+};
+
+export default function OperatorCard({ focus, streak }: Props) {
   return (
     <Panel
       index="01"
@@ -27,14 +32,18 @@ export default function OperatorCard() {
             <p className="font-mono text-[9px] text-ink-3 tracking-widest uppercase mb-1.5">
               Focus
             </p>
-            <p className="text-xs text-ink-4 leading-snug">[ta priorité]</p>
+            {focus ? (
+              <p className="text-xs text-ink-4 leading-snug line-clamp-2">{focus}</p>
+            ) : (
+              <p className="text-xs text-ink-3 italic leading-snug">Aucune priorité</p>
+            )}
           </div>
           <div className="rounded-lg bg-ink-0 border border-ink-2 px-3 py-2.5">
             <p className="font-mono text-[9px] text-ink-3 tracking-widest uppercase mb-1.5">
               Streak
             </p>
             <p className="leading-none">
-              <span className="font-numeric text-xl text-accent">0</span>
+              <span className="font-numeric text-xl text-accent">{streak}</span>
               <span className="font-mono text-[9px] text-ink-3 ml-1.5">JOURS</span>
             </p>
           </div>

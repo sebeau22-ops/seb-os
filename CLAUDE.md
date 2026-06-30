@@ -27,7 +27,7 @@ entities, raw_captures, tasks, daily_logs, memory_chunks (vector 1536), audit_lo
 ## État d'avancement
 - [x] Partie 3 — Foundation (Next.js + Supabase + auth + dashboard Home)
 - [x] Partie 4 — Pipeline de capture (Telegram webhook + web capture + classificateur + embedding)
-- [ ] Partie 5 — Les 7 cartes (données réelles)
+- [x] Partie 5 — Les 7 cartes (données réelles)
 - [ ] Partie 6 — Mémoire
 - [ ] Partie 7 — Déploiement + Telegram + cron
 
@@ -40,3 +40,15 @@ entities, raw_captures, tasks, daily_logs, memory_chunks (vector 1536), audit_lo
 - CaptureBox.tsx : flottante bas de page, ⌘↵ pour envoyer, toast de confirmation
 - Embedding fire-and-forget (ne bloque pas la réponse)
 - Pour Telegram : enregistrer le webhook via curl (voir guide Partie 7 Step 4)
+
+## Partie 5 — Notes d'implémentation
+- lib/data/dashboard.ts : localDateKey(), getOrCreateDailyLog(), getPendingTasks(), getStreak()
+- daily_logs.notes JSON : { priority?: string; habits?: string[] }
+- app/api/daily/route.ts : PATCH — merge + sauvegarde daily_log du jour
+- app/api/tasks/route.ts : PATCH { id } — completed_at = now()
+- OperatorCard : props focus + streak (server)
+- KeyBlockersCard : client, tasks filtrées (key || today || this_week), bouton ✓ compléter
+- SessionCard : client, initialPriority prop, ⌘↵ ou bouton → PATCH /api/daily
+- HabitsCard : client, initialHabits prop, toggle → PATCH /api/daily
+- CalendarCard : client, toutes les tâches pendantes triées urgence → affichage liste
+- page.tsx : async server component, Promise.all([getOrCreateDailyLog, getPendingTasks, getStreak])

@@ -28,7 +28,7 @@ entities, raw_captures, tasks, daily_logs, memory_chunks (vector 1536), audit_lo
 - [x] Partie 3 — Foundation (Next.js + Supabase + auth + dashboard Home)
 - [x] Partie 4 — Pipeline de capture (Telegram webhook + web capture + classificateur + embedding)
 - [x] Partie 5 — Les 7 cartes (données réelles)
-- [ ] Partie 6 — Mémoire
+- [x] Partie 6 — Mémoire
 - [ ] Partie 7 — Déploiement + Telegram + cron
 
 ## Partie 4 — Notes d'implémentation
@@ -52,3 +52,11 @@ entities, raw_captures, tasks, daily_logs, memory_chunks (vector 1536), audit_lo
 - HabitsCard : client, initialHabits prop, toggle → PATCH /api/daily
 - CalendarCard : client, toutes les tâches pendantes triées urgence → affichage liste
 - page.tsx : async server component, Promise.all([getOrCreateDailyLog, getPendingTasks, getStreak])
+
+## Partie 6 — Notes d'implémentation
+- SQL: match_memory_chunks(query_embedding, match_count, match_threshold) — à créer dans Supabase SQL Editor
+- POST /api/memory/search : { q } → embed → rpc match_memory_chunks → { results }
+- MemoryPalette.tsx : overlay ⌘K, debounce 350ms, navigation ↑↓, score de similarité affiché
+- Telegram /recall <query> : recherche et répond avec les 5 meilleurs souvenirs (threshold 0.35)
+- Telegram callback_query : boutons urgence (urgency:today:uuid) et clé (key:true:uuid)
+  → met à jour tasks.urgency ou tasks.key via Supabase, répond avec answerCallbackQuery

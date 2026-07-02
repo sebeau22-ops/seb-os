@@ -91,9 +91,9 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult>
     }
   }
 
-  // ── 4. Embedding + memory_chunks (fire-and-forget) ────────────────────────
-  void embedText(text).then(async (embedding) => {
-    if (!embedding) return;
+  // ── 4. Embedding + memory_chunks (synchrone — Vercel coupe les fire-and-forget) ──
+  const embedding = await embedText(summary);
+  if (embedding) {
     const { error } = await db.from('memory_chunks').insert({
       user_id: USER_ID,
       source_type: 'capture',
@@ -102,7 +102,7 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineResult>
       embedding: `[${embedding.join(',')}]`,
     });
     if (error) console.error('[pipeline] memory_chunks insert échoué:', error);
-  });
+  }
 
   // ── 5. Audit log (fire-and-forget) ───────────────────────────────────────
   void db.from('audit_log').insert({

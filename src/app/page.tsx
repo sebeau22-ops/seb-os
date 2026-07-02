@@ -6,7 +6,7 @@ import KeyBlockersCard  from '@/components/dashboard/KeyBlockersCard';
 import SessionCard      from '@/components/dashboard/SessionCard';
 import HabitsCard       from '@/components/dashboard/HabitsCard';
 import CalendarCard     from '@/components/dashboard/CalendarCard';
-import NutritionCard    from '@/components/dashboard/NutritionCard';
+import GoalsCard        from '@/components/dashboard/GoalsCard';
 import CaptureBox       from '@/components/dashboard/CaptureBox';
 import MemoryPalette    from '@/components/dashboard/MemoryPalette';
 import { getOrCreateDailyLog, getPendingTasks, getStreak } from '@/lib/data/dashboard';
@@ -42,7 +42,7 @@ export default async function Home() {
             <CalendarCard tasks={tasks} />
           </>
         }
-        right={<NutritionCard />}
+        right={<GoalsCard />}
       />
       <CaptureBox />
       <MemoryPalette />

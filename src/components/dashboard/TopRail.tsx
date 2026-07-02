@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 
 const TABS = [
   { id: 'home',    label: 'HOME',    href: '/' },
@@ -11,7 +12,8 @@ const TABS = [
 ] as const;
 
 export default function TopRail() {
-  const [time, setTime]       = useState('--:--:--');
+  const pathname = usePathname();
+  const [time, setTime]     = useState('--:--:--');
   const [dateStr, setDateStr] = useState('');
 
   useEffect(() => {
@@ -20,11 +22,7 @@ export default function TopRail() {
       setTime(now.toLocaleTimeString('fr-CA', { hour12: false }));
       setDateStr(
         now
-          .toLocaleDateString('fr-CA', {
-            weekday: 'short',
-            month: 'short',
-            day: 'numeric',
-          })
+          .toLocaleDateString('fr-CA', { weekday: 'short', month: 'short', day: 'numeric' })
           .toUpperCase(),
       );
     };
@@ -35,7 +33,7 @@ export default function TopRail() {
 
   return (
     <nav className="sticky top-0 z-50 h-14 flex items-center justify-between px-4 border-b border-ink-2 bg-ink-0/95 backdrop-blur-md flex-shrink-0">
-      {/* ── Marque ─────────────────────────────────────────── */}
+      {/* Marque */}
       <div className="flex items-center gap-2 min-w-[160px]">
         <span className="w-2 h-2 rounded-full bg-ok flex-shrink-0 animate-pulse" />
         <span className="font-mono text-[11px] tracking-widest text-ink-4">
@@ -43,32 +41,29 @@ export default function TopRail() {
         </span>
       </div>
 
-      {/* ── Onglets ────────────────────────────────────────── */}
+      {/* Onglets */}
       <div className="hidden md:flex items-center gap-0.5">
         {TABS.map((tab) => {
-          const active = tab.id === 'home';
-          return active ? (
+          const active = tab.href === '/'
+            ? pathname === '/'
+            : pathname.startsWith(tab.href);
+          return (
             <Link
               key={tab.id}
               href={tab.href}
-              className="font-mono text-[10px] tracking-[0.2em] px-4 py-1.5 rounded-md bg-accent/15 text-accent"
+              className={`font-mono text-[10px] tracking-[0.2em] px-4 py-1.5 rounded-md transition-colors ${
+                active
+                  ? 'bg-accent/15 text-accent'
+                  : 'text-ink-3 hover:text-ink-4'
+              }`}
             >
               {tab.label}
             </Link>
-          ) : (
-            <a
-              key={tab.id}
-              href="#"
-              onClick={(e) => e.preventDefault()}
-              className="font-mono text-[10px] tracking-[0.2em] px-4 py-1.5 rounded-md text-ink-3 hover:text-ink-4 transition-colors"
-            >
-              {tab.label}
-            </a>
           );
         })}
       </div>
 
-      {/* ── Date + horloge + avatar ─────────────────────────── */}
+      {/* Date + horloge + avatar */}
       <div className="flex items-center gap-3 min-w-[160px] justify-end">
         <div className="hidden sm:flex flex-col items-end leading-none gap-0.5">
           <span className="font-mono text-[9px] text-ink-3 tracking-wider">{dateStr}</span>

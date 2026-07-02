@@ -1,7 +1,12 @@
 import { type NextRequest, NextResponse } from 'next/server';
 
-const BOURSE_URL = process.env.BOURSE_URL ?? 'https://bourse.sebastienbeaulieu.ca';
-const HUB_API_KEY = process.env.HUB_API_KEY ?? '';
+function cleanEnv(v: string | undefined): string {
+  // Strip BOM (U+FEFF, charCode 65279) and whitespace injected by Turbopack
+  return [...(v ?? '')].filter(c => c.charCodeAt(0) !== 0xFEFF).join('').trim();
+}
+
+const BOURSE_URL  = cleanEnv(process.env.BOURSE_URL) || 'https://bourse.sebastienbeaulieu.ca';
+const HUB_API_KEY = cleanEnv(process.env.HUB_API_KEY);
 
 export const dynamic = 'force-dynamic';
 

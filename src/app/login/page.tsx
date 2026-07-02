@@ -1,31 +1,13 @@
-'use client';
+interface Props {
+  searchParams: Promise<{ error?: string }>;
+}
 
-import { useState, type FormEvent } from 'react';
-
-export default function LoginPage() {
-  const [error, setError]     = useState('');
-  const [pending, setPending] = useState(false);
-
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setPending(true);
-    setError('');
-
-    const password = new FormData(e.currentTarget).get('password') as string;
-
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password }),
-    });
-
-    if (res.ok) {
-      window.location.href = '/';
-    } else {
-      setError('Mot de passe incorrect.');
-      setPending(false);
-    }
-  }
+export default async function LoginPage({ searchParams }: Props) {
+  const { error } = await searchParams;
+  const errorMsg =
+    error === '1'        ? 'Mot de passe incorrect.'
+    : error === 'config' ? 'Configuration serveur manquante.'
+    : null;
 
   return (
     <main className="min-h-screen bg-ink-0 flex items-center justify-center px-4">
@@ -34,7 +16,7 @@ export default function LoginPage() {
           Seb OS
         </h1>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <form method="POST" action="/api/auth/login-form" className="flex flex-col gap-4">
           <input
             type="password"
             name="password"
@@ -47,24 +29,19 @@ export default function LoginPage() {
               'w-full rounded-lg bg-ink-0 border px-4 py-3 text-sm text-ink-4',
               'placeholder:text-ink-3 outline-none transition-colors',
               'focus:border-accent',
-              error ? 'border-danger' : 'border-ink-2',
+              errorMsg ? 'border-danger' : 'border-ink-2',
             ].join(' ')}
           />
 
-          {error && (
-            <p className="text-danger text-xs">{error}</p>
+          {errorMsg && (
+            <p className="text-danger text-xs">{errorMsg}</p>
           )}
 
           <button
             type="submit"
-            disabled={pending}
-            className={[
-              'rounded-lg bg-accent text-ink-0 font-medium py-3 text-sm',
-              'hover:bg-accent-glow transition-colors',
-              'disabled:opacity-50 disabled:cursor-not-allowed',
-            ].join(' ')}
+            className="rounded-lg bg-accent text-ink-0 font-medium py-3 text-sm hover:bg-accent-glow transition-colors"
           >
-            {pending ? 'Vérification…' : 'Entrer'}
+            Entrer
           </button>
         </form>
       </div>

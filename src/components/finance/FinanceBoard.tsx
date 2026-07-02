@@ -3,9 +3,9 @@
 import { useState, useEffect } from 'react';
 
 type PlacementEntry = { valeur: number; change: number };
-type ImmoEntry = { valeur: number; change: number };
-type CreditEntry = { valeur: number; change: number };
-type Totals = { placement: number; immo: number; credit: number; total: number };
+type ImmoEntry      = { valeur: number; change: number };
+type CreditEntry    = { valeur: number; change: number };
+type Totals         = { placement: number; immo: number; credit: number; total: number };
 
 type Snapshot = {
   date_label: string;
@@ -22,6 +22,30 @@ type FinanceData = {
   ok: boolean;
   latest: Snapshot;
   historique: HistoriqueEntry[];
+};
+
+type Position = {
+  symbol: string;
+  qty: number;
+  current_price: number;
+  previous_close: number;
+  day_change: number;
+  day_change_pct: number;
+  value_cad: number;
+  day_gain_cad: number;
+  total_gain_cad: number;
+  currency: string;
+};
+
+type StocksData = {
+  ok: boolean;
+  total_cad: number;
+  daily_gain_cad: number;
+  daily_gain_pct: number;
+  total_gain_cad: number;
+  total_gain_pct: number;
+  usdcad: number;
+  positions: Position[];
 };
 
 function fmt(n: number, compact = false) {
@@ -123,16 +147,20 @@ function PositionRow({ name, valeur, change }: { name: string; valeur: number; c
 }
 
 export default function FinanceBoard() {
-  const [data, setData] = useState<FinanceData | null>(null);
+  const [data,   setData]   = useState<FinanceData | null>(null);
+  const [stocks, setStocks] = useState<StocksData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError]   = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/finance')
-      .then(r => r.json() as Promise<FinanceData & { error?: string }>)
-      .then(d => {
-        if (!d.ok) setError(d.error ?? 'Données patrimoine indisponibles');
-        else setData(d);
+    Promise.all([
+      fetch('/api/finance').then(r => r.json() as Promise<FinanceData & { error?: string }>),
+      fetch('/api/finance/stocks').then(r => r.json() as Promise<StocksData>),
+    ])
+      .then(([fin, stk]) => {
+        if (!fin.ok) setError(fin.error ?? 'Données patrimoine indisponibles');
+        else setData(fin);
+        if (stk.ok) setStocks(stk);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Erreur réseau'))
       .finally(() => setLoading(false));
@@ -169,13 +197,11 @@ export default function FinanceBoard() {
 
   const sparkData = historique.map(h => h.total);
 
-  const placements = Object.entries(latest.placements).sort(
-    (a, b) => b[1].valeur - a[1].valeur,
-  );
-  const immo = Object.entries(latest.immo).sort((a, b) => b[1].valeur - a[1].valeur);
+  const placements    = Object.entries(latest.placements).sort((a, b) => b[1].valeur - a[1].valeur);
+  const immo          = Object.entries(latest.immo).sort((a, b) => b[1].valeur - a[1].valeur);
   const totalPlacement = Object.values(latest.placements).reduce((s, v) => s + v.valeur, 0);
-  const totalImmo = Object.values(latest.immo).reduce((s, v) => s + v.valeur, 0);
-  const totalCredit = Object.values(latest.credit).reduce((s, v) => s + v.valeur, 0);
+  const totalImmo     = Object.values(latest.immo).reduce((s, v) => s + v.valeur, 0);
+  const totalCredit   = Object.values(latest.credit).reduce((s, v) => s + v.valeur, 0);
 
   return (
     <div className="space-y-6">
@@ -254,6 +280,67 @@ export default function FinanceBoard() {
             {immo.map(([name, entry]) => (
               <PositionRow key={name} name={name} valeur={entry.valeur} change={entry.change} />
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Performance du jour — placements auto-gérés ── */}
+      {stocks && (
+        <div className="rounded-xl border border-ink-2 bg-ink-1 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <p className="font-mono text-[9px] text-ink-3 tracking-widest uppercase">
+              Placements auto · performance du jour
+            </p>
+            <div className="flex items-center gap-3">
+              <span className="font-numeric text-sm text-ink-4">{fmt(stocks.total_cad)}</span>
+              <span className={`font-numeric text-sm ${stocks.daily_gain_cad >= 0 ? 'text-ok' : 'text-danger'}`}>
+                {sign(stocks.daily_gain_cad)}{fmt(stocks.daily_gain_cad)}
+                {' '}
+                <span className="text-[10px]">
+                  ({sign(stocks.daily_gain_pct)}{stocks.daily_gain_pct.toFixed(2)}%)
+                </span>
+              </span>
+            </div>
+          </div>
+
+          {/* Table header */}
+          <div className="grid grid-cols-[3fr_2fr_2fr_2fr_2fr] gap-2 pb-1.5 border-b border-ink-2 mb-1">
+            {['SYMBOLE', 'QTÉ', 'PRIX', 'VAR. $', 'VAR. %'].map(h => (
+              <p key={h} className="font-mono text-[8px] text-ink-3 tracking-widest">{h}</p>
+            ))}
+          </div>
+
+          {/* Rows */}
+          {stocks.positions.map(p => {
+            const pos = p.day_gain_cad >= 0;
+            return (
+              <div
+                key={p.symbol}
+                className="grid grid-cols-[3fr_2fr_2fr_2fr_2fr] gap-2 py-2 border-b border-ink-2/50 last:border-0 items-center"
+              >
+                <div>
+                  <span className="font-mono text-xs text-ink-4 font-semibold">{p.symbol}</span>
+                  <span className="font-mono text-[8px] text-ink-3 ml-1">{p.currency}</span>
+                </div>
+                <span className="font-numeric text-xs text-ink-3">{p.qty % 1 === 0 ? p.qty.toFixed(0) : p.qty.toFixed(2)}</span>
+                <span className="font-numeric text-xs text-ink-4">{p.current_price.toLocaleString('fr-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span className={`font-numeric text-xs ${pos ? 'text-ok' : 'text-danger'}`}>
+                  {sign(p.day_gain_cad)}{fmt(p.day_gain_cad, true)}
+                </span>
+                <span className={`font-numeric text-xs ${pos ? 'text-ok' : 'text-danger'}`}>
+                  {sign(p.day_change_pct)}{p.day_change_pct.toFixed(2)}%
+                </span>
+              </div>
+            );
+          })}
+
+          <div className="flex items-center justify-between pt-3 mt-1">
+            <span className="font-mono text-[8px] text-ink-3">
+              USD/CAD {stocks.usdcad.toFixed(4)}
+            </span>
+            <span className={`font-mono text-[9px] ${stocks.total_gain_cad >= 0 ? 'text-ok/70' : 'text-danger/70'}`}>
+              Total depuis achat {sign(stocks.total_gain_cad)}{fmt(stocks.total_gain_cad, true)} ({sign(stocks.total_gain_pct)}{stocks.total_gain_pct.toFixed(1)}%)
+            </span>
           </div>
         </div>
       )}

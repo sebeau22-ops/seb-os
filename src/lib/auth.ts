@@ -46,23 +46,35 @@ export async function signSession(secret: string): Promise<string> {
   return `${payload}.${toB64url(sig)}`;
 }
 
-/** Vérifie la signature HMAC du cookie. subtle.verify est timing-safe par spec. */
+/**
+ * Vérifie la signature HMAC du cookie.
+ * On re-signe le payload et on compare les sorties base64url — évite tout
+ * problème de fromB64url / subtle.verify entre Edge Runtime et Node.js.
+ * Comparaison en temps constant sur les chaînes de même longueur (HMAC-SHA256
+ * → toujours 32 octets → toujours 43 chars base64url).
+ */
 export async function verifySession(token: string, secret: string): Promise<boolean> {
   const sep = token.lastIndexOf('.');
   if (sep < 1) return false;
-  const payload = token.slice(0, sep);
-  let sig: ArrayBuffer;
+  const payload    = token.slice(0, sep);
+  const receivedSig = token.slice(sep + 1);
+
+  const key = await importHmacKey(secret, ['sign']);
+  let computedBuf: ArrayBuffer;
   try {
-    sig = fromB64url(token.slice(sep + 1));
+    computedBuf = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload));
   } catch {
     return false;
   }
-  const key = await importHmacKey(secret, ['verify']);
-  try {
-    return await crypto.subtle.verify('HMAC', key, sig, new TextEncoder().encode(payload));
-  } catch {
-    return false;
-  }
+  const computedSig = toB64url(computedBuf);
+
+  if (receivedSig.length !== computedSig.length) return false;
+  const enc = new TextEncoder();
+  const a = enc.encode(receivedSig);
+  const b = enc.encode(computedSig);
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= (a[i] ?? 0) ^ (b[i] ?? 0);
+  return diff === 0;
 }
 
 // ── Comparaison timing-safe (mots de passe, secrets) ────────────────────────

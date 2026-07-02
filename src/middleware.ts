@@ -6,8 +6,8 @@ import { SESSION_COOKIE, verifySession, timingSafeEqual } from '@/lib/auth';
 const PUBLIC_EXACT = new Set(['/login']);
 
 const PUBLIC_PREFIXES = [
-  '/api/auth/',          // login / logout
-  '/api/telegram/webhook', // webhook entrant
+  '/api/auth/',             // login / logout (dont login-form)
+  '/api/telegram/webhook',  // webhook entrant
 ];
 
 function isPublic(pathname: string): boolean {
@@ -33,12 +33,18 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 
   // 2. Cookie de session signé HMAC
   const token = req.cookies.get(SESSION_COOKIE)?.value;
+  console.log('[middleware]', pathname, '| cookie present:', !!token, '| authSecret length:', authSecret.length);
   if (token && authSecret) {
-    const valid = await verifySession(token, authSecret).catch(() => false);
+    const valid = await verifySession(token, authSecret.trim()).catch((e) => {
+      console.error('[middleware] verifySession threw:', e);
+      return false;
+    });
     if (valid) return NextResponse.next();
-    console.warn('[middleware] verifySession failed for token:', token?.slice(0, 20));
+    console.warn('[middleware] verifySession FAILED for token:', token.slice(0, 20));
   } else if (!authSecret) {
     console.warn('[middleware] AUTH_SECRET manquant');
+  } else {
+    console.log('[middleware] no session cookie');
   }
 
   // 3. Non authentifié → 401 pour les routes API, redirect sinon

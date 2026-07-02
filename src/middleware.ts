@@ -33,8 +33,12 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 
   // 2. Cookie de session signé HMAC
   const token = req.cookies.get(SESSION_COOKIE)?.value;
-  if (token && authSecret && await verifySession(token, authSecret)) {
-    return NextResponse.next();
+  if (token && authSecret) {
+    const valid = await verifySession(token, authSecret).catch(() => false);
+    if (valid) return NextResponse.next();
+    console.warn('[middleware] verifySession failed for token:', token?.slice(0, 20));
+  } else if (!authSecret) {
+    console.warn('[middleware] AUTH_SECRET manquant');
   }
 
   // 3. Non authentifié → 401 pour les routes API, redirect sinon

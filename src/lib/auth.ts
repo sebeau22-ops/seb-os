@@ -13,9 +13,14 @@ function toB64url(buf: ArrayBuffer | Uint8Array): string {
     .replace(/=+$/, '');
 }
 
-function fromB64url(s: string): Uint8Array {
+function fromB64url(s: string): ArrayBuffer {
   const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
-  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const padded = b64.padEnd(Math.ceil(b64.length / 4) * 4, '=');
+  const chars = atob(padded);
+  const buf = new ArrayBuffer(chars.length);
+  const view = new Uint8Array(buf);
+  for (let i = 0; i < chars.length; i++) view[i] = chars.charCodeAt(i);
+  return buf;
 }
 
 // ── Clé HMAC depuis le secret ────────────────────────────────────────────────
@@ -46,7 +51,7 @@ export async function verifySession(token: string, secret: string): Promise<bool
   const sep = token.lastIndexOf('.');
   if (sep < 1) return false;
   const payload = token.slice(0, sep);
-  let sig: Uint8Array;
+  let sig: ArrayBuffer;
   try {
     sig = fromB64url(token.slice(sep + 1));
   } catch {
@@ -54,7 +59,7 @@ export async function verifySession(token: string, secret: string): Promise<bool
   }
   const key = await importHmacKey(secret, ['verify']);
   try {
-    return await crypto.subtle.verify('HMAC', key, sig.buffer as ArrayBuffer, new TextEncoder().encode(payload));
+    return await crypto.subtle.verify('HMAC', key, sig, new TextEncoder().encode(payload));
   } catch {
     return false;
   }

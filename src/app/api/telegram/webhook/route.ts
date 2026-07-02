@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { runPipeline } from '@/lib/router/pipeline';
+import { embedText } from '@/lib/router/embedText';
+import { db } from '@/lib/supabase';
 
 // ── Helper Telegram API ───────────────────────────────────────────────────────
 
@@ -66,6 +68,62 @@ const URGENCY_LABEL: Record<string, string> = {
   someday: 'Un jour',
 };
 
+// ── Commande /recall — recherche sémantique ───────────────────────────────────
+
+type MemoryResult = {
+  chunk_text: string;
+  source_type: string;
+  similarity: number;
+};
+
+async function handleRecall(
+  query: string,
+  chatId: unknown,
+  botToken: string,
+): Promise<void> {
+  if (!query.trim()) {
+    await telegramApi(botToken, 'sendMessage', {
+      chat_id: chatId,
+      text: '🔍 Usage: /recall <ta question>',
+    });
+    return;
+  }
+
+  const embedding = await embedText(query);
+  if (!embedding) {
+    await telegramApi(botToken, 'sendMessage', {
+      chat_id: chatId,
+      text: '❌ Recherche indisponible (clé OpenAI manquante).',
+    });
+    return;
+  }
+
+  const { data, error } = await db.rpc('match_memory_chunks', {
+    query_embedding: embedding as unknown as string,
+    match_count:     5,
+    match_threshold: 0.35,
+  });
+
+  if (error || !data || (data as MemoryResult[]).length === 0) {
+    await telegramApi(botToken, 'sendMessage', {
+      chat_id: chatId,
+      text: '🔍 Aucun souvenir trouvé pour cette requête.',
+    });
+    return;
+  }
+
+  const lines = (data as MemoryResult[]).map((r, i) => {
+    const pct = Math.round(r.similarity * 100);
+    return `${i + 1}. [${pct}%] ${r.chunk_text}`;
+  });
+
+  await telegramApi(botToken, 'sendMessage', {
+    chat_id: chatId,
+    text: `🧠 *Mémoire — « ${query} »*\n\n${lines.join('\n\n')}`,
+    parse_mode: 'Markdown',
+  });
+}
+
 // ── Webhook handler ───────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
@@ -90,6 +148,61 @@ export async function POST(req: NextRequest) {
     update = (await req.json()) as Record<string, unknown>;
   } catch {
     return NextResponse.json({ error: 'JSON invalide' }, { status: 400 });
+  }
+
+  // ── Callback query (boutons urgence / clé) ─────────────────────────────────
+  const callbackQuery = update.callback_query as Record<string, unknown> | undefined;
+  if (callbackQuery) {
+    const cbFrom   = callbackQuery.from as Record<string, unknown>;
+    const cbFromId = String(cbFrom?.id ?? '');
+    if (allowedUserId && cbFromId !== allowedUserId) {
+      return NextResponse.json({ ok: true });
+    }
+
+    const cbData   = (callbackQuery.data as string | undefined) ?? '';
+    const cbChatId = (callbackQuery.message as Record<string, unknown> | undefined)?.chat
+      ? ((callbackQuery.message as Record<string, unknown>).chat as Record<string, unknown>).id
+      : undefined;
+    const callbackId = callbackQuery.id as string;
+
+    const parts = cbData.split(':'); // urgency:today:uuid  OR  key:true:uuid
+    const action = parts[0];
+    const value  = parts[1] ?? '';
+    const captureId = parts[2] ?? '';
+
+    if ((action === 'urgency' || action === 'key') && captureId) {
+      // Trouver la tâche associée
+      const { data: capture } = await db
+        .from('raw_captures')
+        .select('routed_to, routed_id')
+        .eq('id', captureId)
+        .maybeSingle();
+
+      if (capture?.routed_to === 'tasks' && capture.routed_id) {
+        if (action === 'urgency') {
+          await db.from('tasks').update({ urgency: value }).eq('id', capture.routed_id);
+        } else {
+          await db.from('tasks').update({ key: value === 'true' }).eq('id', capture.routed_id);
+        }
+      }
+    }
+
+    // Acquitter le callback Telegram (supprime le spinner)
+    await telegramApi(botToken, 'answerCallbackQuery', {
+      callback_query_id: callbackId,
+      text: action === 'urgency' ? `⏰ Urgence mise à jour` : `🔑 Tâche marquée clé`,
+    });
+
+    if (cbChatId) {
+      await telegramApi(botToken, 'sendMessage', {
+        chat_id: cbChatId,
+        text: action === 'urgency'
+          ? `✅ Urgence → ${URGENCY_LABEL[value] ?? value}`
+          : '✅ Tâche marquée comme clé',
+      });
+    }
+
+    return NextResponse.json({ ok: true });
   }
 
   const message = update.message as Record<string, unknown> | undefined;
@@ -134,6 +247,13 @@ export async function POST(req: NextRequest) {
   }
 
   if (!text.trim()) return NextResponse.json({ ok: true });
+
+  // 3b. Commande /recall — recherche dans la mémoire vectorielle
+  if (text.startsWith('/recall')) {
+    const query = text.replace('/recall', '').trim();
+    await handleRecall(query, chatId, botToken);
+    return NextResponse.json({ ok: true });
+  }
 
   // 4–9. Pipeline + réponse avec clavier urgence
   try {

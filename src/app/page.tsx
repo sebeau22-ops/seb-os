@@ -8,6 +8,7 @@ import HabitsCard       from '@/components/dashboard/HabitsCard';
 import CalendarCard     from '@/components/dashboard/CalendarCard';
 import NutritionCard    from '@/components/dashboard/NutritionCard';
 import CaptureBox       from '@/components/dashboard/CaptureBox';
+import MemoryPalette    from '@/components/dashboard/MemoryPalette';
 import { getOrCreateDailyLog, getPendingTasks, getStreak } from '@/lib/data/dashboard';
 
 export const dynamic = 'force-dynamic';
@@ -44,6 +45,7 @@ export default async function Home() {
         right={<NutritionCard />}
       />
       <CaptureBox />
+      <MemoryPalette />
     </>
   );
 }

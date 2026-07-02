@@ -129,12 +129,12 @@ export default function FinanceBoard() {
 
   useEffect(() => {
     fetch('/api/finance')
-      .then(r => r.json() as Promise<FinanceData>)
+      .then(r => r.json() as Promise<FinanceData & { error?: string }>)
       .then(d => {
-        if (!d.ok) setError('Données patrimoine indisponibles');
+        if (!d.ok) setError(d.error ?? 'Données patrimoine indisponibles');
         else setData(d);
       })
-      .catch(() => setError('Impossible de contacter le serveur Bourse'))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Erreur réseau'))
       .finally(() => setLoading(false));
   }, []);
 

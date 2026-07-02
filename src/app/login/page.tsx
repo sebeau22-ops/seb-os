@@ -1,10 +1,8 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
-  const router = useRouter();
   const [error, setError]     = useState('');
   const [pending, setPending] = useState(false);
 
@@ -22,7 +20,7 @@ export default function LoginPage() {
     });
 
     if (res.ok) {
-      router.replace('/');
+      window.location.href = '/';
     } else {
       setError('Mot de passe incorrect.');
       setPending(false);

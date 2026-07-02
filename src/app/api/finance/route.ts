@@ -7,7 +7,10 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(_req: NextRequest) {
   if (!HUB_API_KEY) {
-    return NextResponse.json({ error: 'HUB_API_KEY non configurée' }, { status: 503 });
+    return NextResponse.json(
+      { ok: false, error: 'HUB_API_KEY non configurée — redémarre le serveur dev' },
+      { status: 503 },
+    );
   }
 
   try {
@@ -19,13 +22,20 @@ export async function GET(_req: NextRequest) {
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       console.error('[/api/finance] Bourse server:', res.status, text);
-      return NextResponse.json({ error: 'Bourse server indisponible' }, { status: 503 });
+      return NextResponse.json(
+        { ok: false, error: `Bourse server HTTP ${res.status}` },
+        { status: 503 },
+      );
     }
 
     const data: unknown = await res.json();
     return NextResponse.json(data);
   } catch (err) {
-    console.error('[/api/finance] fetch error:', err);
-    return NextResponse.json({ error: 'Impossible de contacter le serveur Bourse' }, { status: 503 });
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[/api/finance] fetch error:', msg);
+    return NextResponse.json(
+      { ok: false, error: `Réseau: ${msg}` },
+      { status: 503 },
+    );
   }
 }

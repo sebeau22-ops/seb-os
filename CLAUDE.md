@@ -29,7 +29,14 @@ entities, raw_captures, tasks, daily_logs, memory_chunks (vector 1536), audit_lo
 - [x] Partie 4 — Pipeline de capture (Telegram webhook + web capture + classificateur + embedding)
 - [x] Partie 5 — Les 7 cartes (données réelles)
 - [x] Partie 6 — Mémoire
-- [ ] Partie 7 — Déploiement + Telegram + cron
+- [x] Partie 7 — Déploiement + Telegram + cron (crons Vercel dans vercel.json : daily-digest 11h30, weekly-review dim 23h)
+
+## Au-delà du plan initial
+- Carte Objectifs : semaine + mois, date sentinelle, persistance Supabase
+- CRM complet : Kanban 4 colonnes, Smart search Claude, drawer d'édition, drag entre colonnes
+- Brain tab : "Ask my OS" (Claude + mémoire vectorielle) + recherche sémantique
+- Finance Pulse : intégration patrimoine via le serveur Bourse externe (voir dossier `Bourse/tools`), stocks temps réel
+- Login migré vers Server Action (src/app/login/actions.ts + SubmitButton.tsx) — remplace l'ancienne route /api/auth/login-form
 
 ## Partie 4 — Notes d'implémentation
 - lib/router/classifyCapture.ts : Claude (primaire) → OpenAI → regex

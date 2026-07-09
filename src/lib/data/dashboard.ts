@@ -7,7 +7,7 @@ export function localDateKey(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: TZ }); // YYYY-MM-DD
 }
 
-function shiftDate(dateStr: string, days: number): string {
+export function shiftDate(dateStr: string, days: number): string {
   // noon UTC avoids DST boundary issues
   const d = new Date(dateStr + 'T12:00:00Z');
   d.setUTCDate(d.getUTCDate() + days);

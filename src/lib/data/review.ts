@@ -72,6 +72,10 @@ export async function getWeeklyReview(weekOffset: number): Promise<WeeklyReview>
       .gte('completed_at', rangeStart)
       .lt('completed_at', rangeEndExclusive)
       .order('completed_at', { ascending: false }),
+    // Retard = état ACTUEL (completed_at IS NULL au moment de la requête), pas un
+    // instantané de ce qui était en retard à la fin de cette semaine-là — même limite
+    // que le cron weekly-review. Une tâche encore ouverte apparaît donc identique
+    // en naviguant sur plusieurs semaines passées.
     db
       .from('tasks')
       .select('id, title, created_at')
@@ -80,6 +84,7 @@ export async function getWeeklyReview(weekOffset: number): Promise<WeeklyReview>
       .is('completed_at', null)
       .lt('created_at', rangeEndExclusive)
       .order('created_at', { ascending: true }),
+    // Streak global (actuel), indépendant de weekOffset — ne varie pas en naviguant.
     getStreak(),
   ]);
 

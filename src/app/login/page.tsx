@@ -1,3 +1,6 @@
+import { loginAction } from './actions';
+import { SubmitButton } from '@/components/login/SubmitButton';
+
 interface Props {
   searchParams: Promise<{ error?: string }>;
 }
@@ -16,7 +19,7 @@ export default async function LoginPage({ searchParams }: Props) {
           Seb OS
         </h1>
 
-        <form method="POST" action="/api/auth/login-form" className="flex flex-col gap-4">
+        <form action={loginAction} className="flex flex-col gap-4">
           <input
             type="password"
             name="password"
@@ -37,12 +40,7 @@ export default async function LoginPage({ searchParams }: Props) {
             <p className="text-danger text-xs">{errorMsg}</p>
           )}
 
-          <button
-            type="submit"
-            className="rounded-lg bg-accent text-ink-0 font-medium py-3 text-sm hover:bg-accent-glow transition-colors"
-          >
-            Entrer
-          </button>
+          <SubmitButton />
         </form>
       </div>
     </main>

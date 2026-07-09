@@ -6,7 +6,7 @@ import { SESSION_COOKIE, verifySession, timingSafeEqual } from '@/lib/auth';
 const PUBLIC_EXACT = new Set(['/login']);
 
 const PUBLIC_PREFIXES = [
-  '/api/auth/',             // login / logout (dont login-form)
+  '/api/auth/',             // login / logout
   '/api/telegram/webhook',  // webhook entrant
 ];
 

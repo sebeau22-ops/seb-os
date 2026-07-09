@@ -37,6 +37,7 @@ entities, raw_captures, tasks, daily_logs, memory_chunks (vector 1536), audit_lo
 - Brain tab : "Ask my OS" (Claude + mémoire vectorielle) + recherche sémantique
 - Finance Pulse : intégration patrimoine via le serveur Bourse externe (voir dossier `Bourse/tools`), stocks temps réel
 - Login migré vers Server Action (src/app/login/actions.ts + SubmitButton.tsx) — remplace l'ancienne route /api/auth/login-form
+- Page /review : bilan hebdomadaire navigable (captures par type, tâches complétées, tâches en retard, streak) — équivalent web du cron weekly-review, src/app/review/page.tsx
 
 ## Partie 4 — Notes d'implémentation
 - lib/router/classifyCapture.ts : Claude (primaire) → OpenAI → regex

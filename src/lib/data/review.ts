@@ -73,9 +73,12 @@ export async function getWeeklyReview(weekOffset: number): Promise<WeeklyReview>
       .lt('completed_at', rangeEndExclusive)
       .order('completed_at', { ascending: false }),
     // Retard = état ACTUEL (completed_at IS NULL au moment de la requête), pas un
-    // instantané de ce qui était en retard à la fin de cette semaine-là — même limite
-    // que le cron weekly-review. Une tâche encore ouverte apparaît donc identique
-    // en naviguant sur plusieurs semaines passées.
+    // instantané de ce qui était en retard à la fin de cette semaine-là. Une tâche
+    // encore ouverte apparaît donc identique en naviguant sur plusieurs semaines
+    // passées. Le seuil created_at couvre aussi la semaine visionnée elle-même
+    // (< fin de semaine + 1 jour), contrairement au cron weekly-review qui exclut
+    // la semaine en cours (< début de semaine) — les deux chiffres peuvent donc
+    // différer pour la semaine courante, ce n'est PAS le même critère que le cron.
     db
       .from('tasks')
       .select('id, title, created_at')

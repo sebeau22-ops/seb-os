@@ -3,6 +3,8 @@ import CaptureBox from '@/components/dashboard/CaptureBox';
 import ReviewBoard from '@/components/review/ReviewBoard';
 import { getWeeklyReview } from '@/lib/data/review';
 
+export const dynamic = 'force-dynamic';
+
 interface Props {
   searchParams: Promise<{ week?: string }>;
 }

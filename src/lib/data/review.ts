@@ -32,3 +32,90 @@ export function getWeekRange(weekOffset: number): WeekRange {
 
   return { start, end, label };
 }
+
+export type CaptureBreakdown = { kind: string; count: number };
+
+export type ReviewTask = {
+  id: string;
+  title: string;
+  date: string; // completed_at (tâches complétées) ou created_at (tâches en retard), ISO
+};
+
+export type WeeklyReview = {
+  weekOffset: number;
+  label: string;
+  captureTotal: number;
+  captureBreakdown: CaptureBreakdown[];
+  completedTasks: ReviewTask[];
+  overdueTasks: ReviewTask[];
+  streak: number;
+};
+
+const KIND_FALLBACK = 'capture';
+
+export async function getWeeklyReview(weekOffset: number): Promise<WeeklyReview> {
+  const { start, end, label } = getWeekRange(weekOffset);
+  const rangeStart = `${start}T00:00:00Z`;
+  const rangeEndExclusive = `${shiftDate(end, 1)}T00:00:00Z`;
+
+  const [capturesRes, completedRes, overdueRes, streak] = await Promise.all([
+    db
+      .from('raw_captures')
+      .select('classification')
+      .eq('user_id', USER_ID)
+      .gte('created_at', rangeStart)
+      .lt('created_at', rangeEndExclusive),
+    db
+      .from('tasks')
+      .select('id, title, completed_at')
+      .eq('user_id', USER_ID)
+      .gte('completed_at', rangeStart)
+      .lt('completed_at', rangeEndExclusive)
+      .order('completed_at', { ascending: false }),
+    db
+      .from('tasks')
+      .select('id, title, created_at')
+      .eq('user_id', USER_ID)
+      .eq('urgency', 'today')
+      .is('completed_at', null)
+      .lt('created_at', rangeEndExclusive)
+      .order('created_at', { ascending: true }),
+    getStreak(),
+  ]);
+
+  if (capturesRes.error) console.error('[getWeeklyReview] raw_captures:', capturesRes.error.message);
+  if (completedRes.error) console.error('[getWeeklyReview] completed tasks:', completedRes.error.message);
+  if (overdueRes.error) console.error('[getWeeklyReview] overdue tasks:', overdueRes.error.message);
+
+  const breakdownMap = new Map<string, number>();
+  for (const c of capturesRes.data ?? []) {
+    const classification = c.classification as { kind?: string } | null;
+    const kind = classification?.kind ?? KIND_FALLBACK;
+    breakdownMap.set(kind, (breakdownMap.get(kind) ?? 0) + 1);
+  }
+  const captureBreakdown = [...breakdownMap.entries()]
+    .map(([kind, count]) => ({ kind, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const completedTasks: ReviewTask[] = (completedRes.data ?? []).map((t) => ({
+    id: t.id as string,
+    title: t.title as string,
+    date: t.completed_at as string,
+  }));
+
+  const overdueTasks: ReviewTask[] = (overdueRes.data ?? []).map((t) => ({
+    id: t.id as string,
+    title: t.title as string,
+    date: t.created_at as string,
+  }));
+
+  return {
+    weekOffset,
+    label,
+    captureTotal: (capturesRes.data ?? []).length,
+    captureBreakdown,
+    completedTasks,
+    overdueTasks,
+    streak,
+  };
+}

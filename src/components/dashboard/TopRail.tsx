@@ -10,6 +10,7 @@ const TABS = [
   { id: 'brain',   label: 'BRAIN',   href: '/brain' },
   { id: 'finance', label: 'FINANCE', href: '/finance' },
   { id: 'review',  label: 'REVIEW',  href: '/review' },
+  { id: 'mapping', label: 'MAPPING', href: '/mapping' },
 ] as const;
 
 export default function TopRail() {

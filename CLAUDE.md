@@ -38,6 +38,7 @@ entities, raw_captures, tasks, daily_logs, memory_chunks (vector 1536), audit_lo
 - Finance Pulse : intégration patrimoine via le serveur Bourse externe (voir dossier `Bourse/tools`), stocks temps réel
 - Login migré vers Server Action (src/app/login/actions.ts + SubmitButton.tsx) — remplace l'ancienne route /api/auth/login-form
 - Page /review : bilan hebdomadaire navigable (captures par type, tâches complétées, tâches en retard, streak) — équivalent web du cron weekly-review, src/app/review/page.tsx
+- Page /mapping : projection mapping vidéo sur objets (100 % client). Formes dessinées point par point, rendu WebGL avec homographie (déformation 4 coins) ou masque polygonal, fenêtre projecteur via canvas.captureStream(), médias stockés en IndexedDB et disposition en localStorage — src/components/mapping/MappingStudio.tsx, src/lib/mapping/
 
 ## Partie 4 — Notes d'implémentation
 - lib/router/classifyCapture.ts : Claude (primaire) → OpenAI → regex

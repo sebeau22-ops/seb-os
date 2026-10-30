@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Pt } from '@/lib/mapping/geometry';
 import { projectOnSegment } from '@/lib/mapping/geometry';
+import { AudioMixer, downloadBlob, extensionFor, pickMimeType, startRecording } from '@/lib/mapping/recorder';
 import { createTestPattern, MappingRenderer, type Fit, type RenderSource } from '@/lib/mapping/renderer';
 import {
   deleteSource, listSources, loadLayout, putSource, saveLayout,
@@ -34,6 +35,11 @@ type Drag =
   | { type: 'vertex'; shapeId: string; index: number }
   | { type: 'shape'; shapeId: string; start: Pt; orig: Pt[] };
 
+function formatTime(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 const btn = 'font-mono text-[10px] tracking-[0.15em] uppercase px-3 py-2 rounded-md border transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
 const btnGhost = `${btn} border-ink-2 text-ink-3 hover:text-ink-4 hover:border-ink-3`;
@@ -59,6 +65,8 @@ export default function MappingStudio() {
   const [displayWidth, setDisplayWidth] = useState(800);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recording, setRecording] = useState<{ startedAt: number; durationMs: number | null } | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -71,6 +79,9 @@ export default function MappingStudio() {
   const dragRef = useRef<Drag | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const playingRef = useRef(true);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const autoStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mixerRef = useRef(new AudioMixer());
 
   const aspect = ASPECTS[aspectKey] ?? 16 / 9;
   const viewH = VIEW_W / aspect;
@@ -201,6 +212,62 @@ export default function MappingStudio() {
   function restartAll() {
     for (const v of videos()) v.currentTime = 0;
   }
+
+  // ── Export vidéo ───────────────────────────────────────────────────────────
+
+  function startExport() {
+    const canvas = canvasRef.current;
+    if (!canvas || recorderRef.current) return;
+    const mime = pickMimeType();
+    if (!mime) {
+      setError('Ce navigateur ne permet pas d’enregistrer une vidéo. Essayez Chrome, Edge ou Safari récent.');
+      return;
+    }
+
+    // Durée d'une boucle = la plus longue vidéo projetée dans une forme
+    const usedIds = new Set(shapesRef.current.map((s) => s.sourceId));
+    const used = [...sourceElsRef.current.entries()]
+      .filter(([id, s]) => usedIds.has(id) && s.el instanceof HTMLVideoElement)
+      .map(([, s]) => s.el as HTMLVideoElement);
+    const longest = Math.max(0, ...used.map((v) => (Number.isFinite(v.duration) ? v.duration : 0)));
+
+    restartAll();
+    if (!playingRef.current) togglePlay();
+
+    const all = videos();
+    const audio = all.some((v) => !v.muted) ? mixerRef.current.stream(all) : null;
+    const ext = extensionFor(mime);
+
+    recorderRef.current = startRecording(canvas, audio, mime, (blob) => {
+      const stamp = new Date().toLocaleString('sv-SE', { timeZone: 'America/Toronto' }).replace(/[: ]/g, '-').slice(0, 16);
+      downloadBlob(blob, `mapping-${stamp}.${ext}`);
+      recorderRef.current = null;
+      setRecording(null);
+    });
+    const durationMs = longest > 0 ? Math.round(longest * 1000) : null;
+    if (durationMs) autoStopRef.current = setTimeout(stopExport, durationMs + 150);
+    setElapsedMs(0);
+    setRecording({ startedAt: performance.now(), durationMs });
+  }
+
+  function stopExport() {
+    if (autoStopRef.current) clearTimeout(autoStopRef.current);
+    autoStopRef.current = null;
+    const rec = recorderRef.current;
+    if (rec && rec.state !== 'inactive') rec.stop();
+  }
+
+  useEffect(() => {
+    if (!recording) return;
+    const id = setInterval(() => setElapsedMs(performance.now() - recording.startedAt), 250);
+    return () => clearInterval(id);
+  }, [recording]);
+
+  useEffect(() => () => {
+    if (autoStopRef.current) clearTimeout(autoStopRef.current);
+    const rec = recorderRef.current;
+    if (rec && rec.state !== 'inactive') rec.stop();
+  }, []);
 
   // ── Rendu WebGL ────────────────────────────────────────────────────────────
 
@@ -521,6 +588,23 @@ export default function MappingStudio() {
           <span className="w-px h-6 bg-ink-2 mx-1" />
           <button className={btnGhost} onClick={openProjectorWindow}>⧉ Fenêtre projecteur</button>
           <button className={btnGhost} onClick={toggleFullscreen}>⛶ Plein écran</button>
+          {recording ? (
+            <button className={`${btn} border-danger/50 bg-danger/15 text-danger hover:bg-danger/25`} onClick={stopExport}>
+              ■ Arrêter et télécharger{' '}
+              <span className="font-numeric">
+                {formatTime(elapsedMs)}{recording.durationMs ? ` / ${formatTime(recording.durationMs)}` : ''}
+              </span>
+            </button>
+          ) : (
+            <button
+              className={btnGhost}
+              onClick={startExport}
+              disabled={shapes.length === 0}
+              title="Enregistre le résultat projeté (une boucle complète de la vidéo) et le télécharge"
+            >
+              ⤓ Exporter la vidéo
+            </button>
+          )}
           <select
             className="bg-ink-1 border border-ink-2 rounded-md px-2 py-1.5 font-mono text-[11px] text-ink-4"
             value={aspectKey}
@@ -797,6 +881,10 @@ export default function MappingStudio() {
             <li>Remplacez la mire par votre vidéo.</li>
           </ol>
           <p className="mt-2">Gardez cet onglet ouvert (non réduit) : c’est lui qui calcule l’image envoyée au projecteur.</p>
+          <p className="mt-2">
+            « Exporter la vidéo » enregistre le résultat en temps réel (une boucle complète, son compris si une vidéo
+            n’est pas muette) puis télécharge le fichier. Restez sur cet onglet pendant l’enregistrement.
+          </p>
         </section>
       </aside>
     </div>

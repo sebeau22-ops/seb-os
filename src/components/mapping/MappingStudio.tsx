@@ -16,6 +16,7 @@ const ASPECTS: Record<string, number> = { '16:9': 16 / 9, '16:10': 16 / 10, '4:3
 const RENDER_WIDTH = 1920;
 const VIEW_W = 1000;
 const GRID_ID = 'grid';
+const DEFAULT_RECT: Pt[] = [{ x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 }, { x: 0.7, y: 0.7 }, { x: 0.3, y: 0.7 }];
 const COLORS = ['#2dd4a7', '#f5a524', '#60a5fa', '#f472b6', '#a78bfa', '#facc15', '#fb7185'];
 
 const FIT_LABELS: Record<Fit, string> = {
@@ -34,6 +35,17 @@ interface SourceMeta {
 type Drag =
   | { type: 'vertex'; shapeId: string; index: number }
   | { type: 'shape'; shapeId: string; start: Pt; orig: Pt[] };
+
+const VIDEO_EXT = /\.(mov|mp4|m4v|webm|ogv|3gp)$/i;
+const IMAGE_EXT = /\.(jpe?g|png|gif|webp|heic|heif|avif)$/i;
+
+/** Type MIME du fichier ; iOS laisse parfois file.type vide, on se rabat sur l'extension. */
+function mediaType(file: File): string | null {
+  if (file.type.startsWith('video/') || file.type.startsWith('image/')) return file.type;
+  if (VIDEO_EXT.test(file.name)) return 'video/mp4';
+  if (IMAGE_EXT.test(file.name)) return 'image/jpeg';
+  return null;
+}
 
 function formatTime(ms: number): string {
   const total = Math.floor(ms / 1000);
@@ -63,6 +75,7 @@ export default function MappingStudio() {
   const [fullscreen, setFullscreen] = useState(false);
   const [showHandles, setShowHandles] = useState(true);
   const [displayWidth, setDisplayWidth] = useState(800);
+  const [coarsePointer, setCoarsePointer] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recording, setRecording] = useState<{ startedAt: number; durationMs: number | null } | null>(null);
@@ -72,6 +85,7 @@ export default function MappingStudio() {
   const svgRef = useRef<SVGSVGElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const mediaHostRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<MappingRenderer | null>(null);
   const sourceElsRef = useRef(new Map<string, RenderSource>());
   const urlsRef = useRef(new Map<string, string>());
@@ -85,7 +99,7 @@ export default function MappingStudio() {
 
   const aspect = ASPECTS[aspectKey] ?? 16 / 9;
   const viewH = VIEW_W / aspect;
-  const handleR = (7 * VIEW_W) / Math.max(displayWidth, 1);
+  const handleR = ((coarsePointer ? 14 : 7) * VIEW_W) / Math.max(displayWidth, 1);
   const selected = shapes.find((s) => s.id === selectedId) ?? null;
   const overlayVisible = !fullscreen || showHandles;
 
@@ -102,17 +116,33 @@ export default function MappingStudio() {
     const isVideo = stored.type.startsWith('video/');
     if (isVideo) {
       const v = document.createElement('video');
-      v.src = url;
-      v.loop = true;
+      // iOS Safari : attributs (pas seulement propriétés) posés AVANT src,
+      // sinon la vidéo refuse de démarrer sans plein écran
+      v.setAttribute('playsinline', '');
+      v.setAttribute('webkit-playsinline', '');
+      v.setAttribute('muted', '');
       v.muted = true;
       v.playsInline = true;
+      v.loop = true;
       v.preload = 'auto';
+      v.onerror = () => {
+        console.error('[mapping] vidéo illisible', stored.name, v.error);
+        setError(`Impossible de lire « ${stored.name} » dans ce navigateur (format ou codec non supporté).`);
+      };
+      v.src = url;
+      // iOS ne décode pas les images d'une vidéo détachée du DOM : on la garde
+      // dans un conteneur invisible
+      mediaHostRef.current?.append(v);
       if (playingRef.current) {
-        v.play().catch((e) => console.error('[mapping] lecture vidéo impossible', stored.name, e));
+        v.play().catch((e) => console.error('[mapping] lecture vidéo en attente d’un toucher', stored.name, e));
       }
       sourceElsRef.current.set(stored.id, { el: v });
     } else {
       const img = new Image();
+      img.onerror = () => {
+        console.error('[mapping] image illisible', stored.name);
+        setError(`Impossible d’ouvrir l’image « ${stored.name} » dans ce navigateur.`);
+      };
       img.src = url;
       sourceElsRef.current.set(stored.id, { el: img });
     }
@@ -154,20 +184,39 @@ export default function MappingStudio() {
   async function addFiles(files: FileList | null) {
     if (!files?.length) return;
     const metas: SourceMeta[] = [];
+    const toStore: StoredSource[] = [];
     for (const file of Array.from(files)) {
-      if (!file.type.startsWith('video/') && !file.type.startsWith('image/')) {
+      const type = mediaType(file);
+      if (!type) {
         setError(`Format non supporté : ${file.name}`);
         continue;
       }
-      const stored: StoredSource = { id: crypto.randomUUID(), name: file.name, type: file.type, blob: file };
-      await putSource(stored);
+      const stored: StoredSource = { id: crypto.randomUUID(), name: file.name, type, blob: file };
+      // On affiche tout de suite ; l'enregistrement local (lent sur iPhone
+      // pour les grosses vidéos) se fait ensuite
       metas.push(attachSource(stored));
+      toStore.push(stored);
     }
     if (!metas.length) return;
     setSources((prev) => [...prev, ...metas]);
     setDefaultSourceId(metas[metas.length - 1]!.id);
-    // Si une forme est sélectionnée, on lui assigne directement le premier média ajouté
-    if (selectedId) updateShape(selectedId, { sourceId: metas[0]!.id });
+    const first = metas[0]!.id;
+    if (selectedId) {
+      // Une forme est sélectionnée : elle reçoit directement le média
+      updateShape(selectedId, { sourceId: first });
+    } else if (shapesRef.current.length === 0) {
+      // Première vidéo et aucune forme : on crée un rectangle pour la voir tout de suite
+      addShape({ ...newShape(DEFAULT_RECT), sourceId: first });
+    }
+    for (const stored of toStore) await putSource(stored);
+  }
+
+  /** Clic sur un média : l'envoie dans la forme sélectionnée, ou crée une forme. */
+  function assignMedia(id: string) {
+    if (selectedId) updateShape(selectedId, { sourceId: id });
+    else addShape({ ...newShape(DEFAULT_RECT), sourceId: id });
+    setDefaultSourceId(id);
+    setMode('select');
   }
 
   async function removeSource(id: string) {
@@ -267,6 +316,26 @@ export default function MappingStudio() {
     if (autoStopRef.current) clearTimeout(autoStopRef.current);
     const rec = recorderRef.current;
     if (rec && rec.state !== 'inactive') rec.stop();
+  }, []);
+
+  // iPhone (mode économie d'énergie, etc.) : la lecture peut être refusée
+  // tant que l'utilisateur n'a pas touché l'écran. On relance à chaque toucher.
+  useEffect(() => {
+    const unlock = () => {
+      if (!playingRef.current) return;
+      for (const v of videos()) {
+        if (v.paused) v.play().catch((e) => console.error('[mapping] lecture refusée', e));
+      }
+    };
+    const mq = window.matchMedia('(pointer: coarse)');
+    const onMq = () => setCoarsePointer(mq.matches);
+    onMq();
+    mq.addEventListener('change', onMq);
+    window.addEventListener('pointerdown', unlock, true);
+    return () => {
+      mq.removeEventListener('change', onMq);
+      window.removeEventListener('pointerdown', unlock, true);
+    };
   }, []);
 
   // ── Rendu WebGL ────────────────────────────────────────────────────────────
@@ -375,7 +444,7 @@ export default function MappingStudio() {
   }
 
   function addRectangle() {
-    addShape(newShape([{ x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 }, { x: 0.7, y: 0.7 }, { x: 0.3, y: 0.7 }]));
+    addShape(newShape(DEFAULT_RECT));
     setMode('select');
   }
 
@@ -566,6 +635,7 @@ export default function MappingStudio() {
 
   return (
     <div className="flex flex-col lg:flex-row gap-4 p-4">
+      <div ref={mediaHostRef} aria-hidden className="fixed left-0 top-0 w-px h-px overflow-hidden opacity-0 pointer-events-none" />
       {/* Scène */}
       <div className="flex-1 min-w-0 flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -844,19 +914,16 @@ export default function MappingStudio() {
             {sources.map((s) => (
               <li key={s.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-ink-4 hover:bg-ink-2/40">
                 <span className="font-mono text-[10px] text-ink-3 w-4">{s.kind === 'video' ? '▶' : s.kind === 'image' ? '▣' : '#'}</span>
-                <span className="truncate flex-1" title={s.name}>{s.name}</span>
+                <button
+                  className="truncate flex-1 text-left hover:text-accent"
+                  title={selected ? `Projeter « ${s.name} » dans ${selected.name}` : `Projeter « ${s.name} » dans une nouvelle forme`}
+                  onClick={() => assignMedia(s.id)}
+                >
+                  {s.name}
+                </button>
                 {s.kind === 'video' && (
                   <button className="font-mono text-[10px] text-ink-3 hover:text-ink-4" onClick={() => toggleMute(s.id)} title="Son">
                     {s.muted ? '🔇' : '🔊'}
-                  </button>
-                )}
-                {selected && (
-                  <button
-                    className="font-mono text-[10px] text-accent hover:text-accent-glow"
-                    onClick={() => updateShape(selected.id, { sourceId: s.id })}
-                    title="Projeter dans la forme sélectionnée"
-                  >
-                    ↳
                   </button>
                 )}
                 {s.kind !== 'grid' && (

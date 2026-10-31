@@ -74,6 +74,8 @@ export default function MappingStudio() {
   const [playing, setPlaying] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
   const [showHandles, setShowHandles] = useState(true);
+  const [chromeVisible, setChromeVisible] = useState(false);
+  const chromeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [displayWidth, setDisplayWidth] = useState(800);
   const [coarsePointer, setCoarsePointer] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -375,10 +377,24 @@ export default function MappingStudio() {
     const onChange = () => {
       const fs = document.fullscreenElement === wrapRef.current;
       setFullscreen(fs);
-      setShowHandles(!fs);
+      // On garde les lignes visibles en entrant en plein écran : c'est là
+      // qu'on ajuste les formes sur l'objet. « Masquer les lignes » pour projeter.
+      setShowHandles(true);
     };
     document.addEventListener('fullscreenchange', onChange);
     return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  // Lignes masquées en plein écran : le bouton pour les réafficher apparaît
+  // quelques secondes quand on bouge la souris ou touche l'écran
+  function revealChrome() {
+    setChromeVisible(true);
+    if (chromeTimerRef.current) clearTimeout(chromeTimerRef.current);
+    chromeTimerRef.current = setTimeout(() => setChromeVisible(false), 2500);
+  }
+
+  useEffect(() => () => {
+    if (chromeTimerRef.current) clearTimeout(chromeTimerRef.current);
   }, []);
 
   const toggleFullscreen = useCallback(() => {
@@ -694,9 +710,36 @@ export default function MappingStudio() {
 
         <div
           ref={wrapRef}
-          className={fullscreen ? 'w-screen h-screen bg-black flex items-center justify-center' : 'flex justify-center'}
-          style={fullscreen && !showHandles ? { cursor: 'none' } : undefined}
+          className={fullscreen ? 'relative w-screen h-screen bg-black flex items-center justify-center' : 'flex justify-center'}
+          style={fullscreen && !showHandles && !chromeVisible ? { cursor: 'none' } : undefined}
+          onPointerMove={fullscreen && !showHandles ? revealChrome : undefined}
+          onPointerDown={fullscreen && !showHandles ? revealChrome : undefined}
         >
+          {fullscreen && showHandles && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100vw-1.5rem)] flex flex-wrap items-center justify-center gap-2 rounded-lg border border-ink-2 bg-ink-0/90 p-2 backdrop-blur">
+              <button className={mode === 'draw' ? btnAccent : btnGhost} onClick={mode === 'draw' ? finishDraft : startDrawing}>
+                {mode === 'draw' ? `Terminer (${draft.length} pts)` : '✎ Dessiner une forme'}
+              </button>
+              <button className={btnGhost} onClick={addRectangle}>▭ Rectangle</button>
+              {selected && (
+                <button className={`${btn} border-danger/40 text-danger hover:bg-danger/10`} onClick={deleteSelected}>
+                  Supprimer
+                </button>
+              )}
+              <button className={btnAccent} onClick={() => { setShowHandles(false); setChromeVisible(false); }}>
+                ◉ Masquer les lignes
+              </button>
+              <button className={btnGhost} onClick={toggleFullscreen}>✕ Quitter</button>
+            </div>
+          )}
+          {fullscreen && !showHandles && chromeVisible && (
+            <button
+              className={`${btnGhost} absolute top-3 right-3 z-10 bg-ink-0/80`}
+              onClick={() => setShowHandles(true)}
+            >
+              ✎ Afficher les lignes
+            </button>
+          )}
           <div
             className={`relative bg-black ${fullscreen ? '' : 'rounded-md ring-1 ring-ink-2'}`}
             style={{ width: stageWidth, aspectRatio: String(aspect) }}
@@ -712,7 +755,11 @@ export default function MappingStudio() {
               viewBox={`0 0 ${VIEW_W} ${viewH}`}
               preserveAspectRatio="none"
               className="absolute inset-0 w-full h-full touch-none select-none"
-              style={{ cursor: mode === 'draw' ? 'crosshair' : 'default', opacity: overlayVisible ? 1 : 0 }}
+              style={{
+                cursor: mode === 'draw' ? 'crosshair' : 'default',
+                opacity: overlayVisible ? 1 : 0,
+                pointerEvents: overlayVisible ? 'auto' : 'none',
+              }}
               onPointerDown={onBackgroundDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}

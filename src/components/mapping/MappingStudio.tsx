@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Pt } from '@/lib/mapping/geometry';
 import { projectOnSegment } from '@/lib/mapping/geometry';
+import { AudioMixer, downloadBlob, extensionFor, pickMimeType, startRecording } from '@/lib/mapping/recorder';
 import { createTestPattern, MappingRenderer, type Fit, type RenderSource } from '@/lib/mapping/renderer';
 import {
   deleteSource, listSources, loadLayout, putSource, saveLayout,
@@ -15,6 +16,7 @@ const ASPECTS: Record<string, number> = { '16:9': 16 / 9, '16:10': 16 / 10, '4:3
 const RENDER_WIDTH = 1920;
 const VIEW_W = 1000;
 const GRID_ID = 'grid';
+const DEFAULT_RECT: Pt[] = [{ x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 }, { x: 0.7, y: 0.7 }, { x: 0.3, y: 0.7 }];
 const COLORS = ['#2dd4a7', '#f5a524', '#60a5fa', '#f472b6', '#a78bfa', '#facc15', '#fb7185'];
 
 const FIT_LABELS: Record<Fit, string> = {
@@ -33,6 +35,22 @@ interface SourceMeta {
 type Drag =
   | { type: 'vertex'; shapeId: string; index: number }
   | { type: 'shape'; shapeId: string; start: Pt; orig: Pt[] };
+
+const VIDEO_EXT = /\.(mov|mp4|m4v|webm|ogv|3gp)$/i;
+const IMAGE_EXT = /\.(jpe?g|png|gif|webp|heic|heif|avif)$/i;
+
+/** Type MIME du fichier ; iOS laisse parfois file.type vide, on se rabat sur l'extension. */
+function mediaType(file: File): string | null {
+  if (file.type.startsWith('video/') || file.type.startsWith('image/')) return file.type;
+  if (VIDEO_EXT.test(file.name)) return 'video/mp4';
+  if (IMAGE_EXT.test(file.name)) return 'image/jpeg';
+  return null;
+}
+
+function formatTime(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 const btn = 'font-mono text-[10px] tracking-[0.15em] uppercase px-3 py-2 rounded-md border transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
@@ -56,14 +74,20 @@ export default function MappingStudio() {
   const [playing, setPlaying] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
   const [showHandles, setShowHandles] = useState(true);
+  const [chromeVisible, setChromeVisible] = useState(false);
+  const chromeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [displayWidth, setDisplayWidth] = useState(800);
+  const [coarsePointer, setCoarsePointer] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recording, setRecording] = useState<{ startedAt: number; durationMs: number | null } | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const mediaHostRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<MappingRenderer | null>(null);
   const sourceElsRef = useRef(new Map<string, RenderSource>());
   const urlsRef = useRef(new Map<string, string>());
@@ -71,10 +95,13 @@ export default function MappingStudio() {
   const dragRef = useRef<Drag | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const playingRef = useRef(true);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const autoStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mixerRef = useRef(new AudioMixer());
 
   const aspect = ASPECTS[aspectKey] ?? 16 / 9;
   const viewH = VIEW_W / aspect;
-  const handleR = (7 * VIEW_W) / Math.max(displayWidth, 1);
+  const handleR = ((coarsePointer ? 14 : 7) * VIEW_W) / Math.max(displayWidth, 1);
   const selected = shapes.find((s) => s.id === selectedId) ?? null;
   const overlayVisible = !fullscreen || showHandles;
 
@@ -91,17 +118,33 @@ export default function MappingStudio() {
     const isVideo = stored.type.startsWith('video/');
     if (isVideo) {
       const v = document.createElement('video');
-      v.src = url;
-      v.loop = true;
+      // iOS Safari : attributs (pas seulement propriétés) posés AVANT src,
+      // sinon la vidéo refuse de démarrer sans plein écran
+      v.setAttribute('playsinline', '');
+      v.setAttribute('webkit-playsinline', '');
+      v.setAttribute('muted', '');
       v.muted = true;
       v.playsInline = true;
+      v.loop = true;
       v.preload = 'auto';
+      v.onerror = () => {
+        console.error('[mapping] vidéo illisible', stored.name, v.error);
+        setError(`Impossible de lire « ${stored.name} » dans ce navigateur (format ou codec non supporté).`);
+      };
+      v.src = url;
+      // iOS ne décode pas les images d'une vidéo détachée du DOM : on la garde
+      // dans un conteneur invisible
+      mediaHostRef.current?.append(v);
       if (playingRef.current) {
-        v.play().catch((e) => console.error('[mapping] lecture vidéo impossible', stored.name, e));
+        v.play().catch((e) => console.error('[mapping] lecture vidéo en attente d’un toucher', stored.name, e));
       }
       sourceElsRef.current.set(stored.id, { el: v });
     } else {
       const img = new Image();
+      img.onerror = () => {
+        console.error('[mapping] image illisible', stored.name);
+        setError(`Impossible d’ouvrir l’image « ${stored.name} » dans ce navigateur.`);
+      };
       img.src = url;
       sourceElsRef.current.set(stored.id, { el: img });
     }
@@ -143,20 +186,39 @@ export default function MappingStudio() {
   async function addFiles(files: FileList | null) {
     if (!files?.length) return;
     const metas: SourceMeta[] = [];
+    const toStore: StoredSource[] = [];
     for (const file of Array.from(files)) {
-      if (!file.type.startsWith('video/') && !file.type.startsWith('image/')) {
+      const type = mediaType(file);
+      if (!type) {
         setError(`Format non supporté : ${file.name}`);
         continue;
       }
-      const stored: StoredSource = { id: crypto.randomUUID(), name: file.name, type: file.type, blob: file };
-      await putSource(stored);
+      const stored: StoredSource = { id: crypto.randomUUID(), name: file.name, type, blob: file };
+      // On affiche tout de suite ; l'enregistrement local (lent sur iPhone
+      // pour les grosses vidéos) se fait ensuite
       metas.push(attachSource(stored));
+      toStore.push(stored);
     }
     if (!metas.length) return;
     setSources((prev) => [...prev, ...metas]);
     setDefaultSourceId(metas[metas.length - 1]!.id);
-    // Si une forme est sélectionnée, on lui assigne directement le premier média ajouté
-    if (selectedId) updateShape(selectedId, { sourceId: metas[0]!.id });
+    const first = metas[0]!.id;
+    if (selectedId) {
+      // Une forme est sélectionnée : elle reçoit directement le média
+      updateShape(selectedId, { sourceId: first });
+    } else if (shapesRef.current.length === 0) {
+      // Première vidéo et aucune forme : on crée un rectangle pour la voir tout de suite
+      addShape({ ...newShape(DEFAULT_RECT), sourceId: first });
+    }
+    for (const stored of toStore) await putSource(stored);
+  }
+
+  /** Clic sur un média : l'envoie dans la forme sélectionnée, ou crée une forme. */
+  function assignMedia(id: string) {
+    if (selectedId) updateShape(selectedId, { sourceId: id });
+    else addShape({ ...newShape(DEFAULT_RECT), sourceId: id });
+    setDefaultSourceId(id);
+    setMode('select');
   }
 
   async function removeSource(id: string) {
@@ -202,6 +264,82 @@ export default function MappingStudio() {
     for (const v of videos()) v.currentTime = 0;
   }
 
+  // ── Export vidéo ───────────────────────────────────────────────────────────
+
+  function startExport() {
+    const canvas = canvasRef.current;
+    if (!canvas || recorderRef.current) return;
+    const mime = pickMimeType();
+    if (!mime) {
+      setError('Ce navigateur ne permet pas d’enregistrer une vidéo. Essayez Chrome, Edge ou Safari récent.');
+      return;
+    }
+
+    // Durée d'une boucle = la plus longue vidéo projetée dans une forme
+    const usedIds = new Set(shapesRef.current.map((s) => s.sourceId));
+    const used = [...sourceElsRef.current.entries()]
+      .filter(([id, s]) => usedIds.has(id) && s.el instanceof HTMLVideoElement)
+      .map(([, s]) => s.el as HTMLVideoElement);
+    const longest = Math.max(0, ...used.map((v) => (Number.isFinite(v.duration) ? v.duration : 0)));
+
+    restartAll();
+    if (!playingRef.current) togglePlay();
+
+    const all = videos();
+    const audio = all.some((v) => !v.muted) ? mixerRef.current.stream(all) : null;
+    const ext = extensionFor(mime);
+
+    recorderRef.current = startRecording(canvas, audio, mime, (blob) => {
+      const stamp = new Date().toLocaleString('sv-SE', { timeZone: 'America/Toronto' }).replace(/[: ]/g, '-').slice(0, 16);
+      downloadBlob(blob, `mapping-${stamp}.${ext}`);
+      recorderRef.current = null;
+      setRecording(null);
+    });
+    const durationMs = longest > 0 ? Math.round(longest * 1000) : null;
+    if (durationMs) autoStopRef.current = setTimeout(stopExport, durationMs + 150);
+    setElapsedMs(0);
+    setRecording({ startedAt: performance.now(), durationMs });
+  }
+
+  function stopExport() {
+    if (autoStopRef.current) clearTimeout(autoStopRef.current);
+    autoStopRef.current = null;
+    const rec = recorderRef.current;
+    if (rec && rec.state !== 'inactive') rec.stop();
+  }
+
+  useEffect(() => {
+    if (!recording) return;
+    const id = setInterval(() => setElapsedMs(performance.now() - recording.startedAt), 250);
+    return () => clearInterval(id);
+  }, [recording]);
+
+  useEffect(() => () => {
+    if (autoStopRef.current) clearTimeout(autoStopRef.current);
+    const rec = recorderRef.current;
+    if (rec && rec.state !== 'inactive') rec.stop();
+  }, []);
+
+  // iPhone (mode économie d'énergie, etc.) : la lecture peut être refusée
+  // tant que l'utilisateur n'a pas touché l'écran. On relance à chaque toucher.
+  useEffect(() => {
+    const unlock = () => {
+      if (!playingRef.current) return;
+      for (const v of videos()) {
+        if (v.paused) v.play().catch((e) => console.error('[mapping] lecture refusée', e));
+      }
+    };
+    const mq = window.matchMedia('(pointer: coarse)');
+    const onMq = () => setCoarsePointer(mq.matches);
+    onMq();
+    mq.addEventListener('change', onMq);
+    window.addEventListener('pointerdown', unlock, true);
+    return () => {
+      mq.removeEventListener('change', onMq);
+      window.removeEventListener('pointerdown', unlock, true);
+    };
+  }, []);
+
   // ── Rendu WebGL ────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -239,10 +377,24 @@ export default function MappingStudio() {
     const onChange = () => {
       const fs = document.fullscreenElement === wrapRef.current;
       setFullscreen(fs);
-      setShowHandles(!fs);
+      // On garde les lignes visibles en entrant en plein écran : c'est là
+      // qu'on ajuste les formes sur l'objet. « Masquer les lignes » pour projeter.
+      setShowHandles(true);
     };
     document.addEventListener('fullscreenchange', onChange);
     return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  // Lignes masquées en plein écran : le bouton pour les réafficher apparaît
+  // quelques secondes quand on bouge la souris ou touche l'écran
+  function revealChrome() {
+    setChromeVisible(true);
+    if (chromeTimerRef.current) clearTimeout(chromeTimerRef.current);
+    chromeTimerRef.current = setTimeout(() => setChromeVisible(false), 2500);
+  }
+
+  useEffect(() => () => {
+    if (chromeTimerRef.current) clearTimeout(chromeTimerRef.current);
   }, []);
 
   const toggleFullscreen = useCallback(() => {
@@ -308,7 +460,7 @@ export default function MappingStudio() {
   }
 
   function addRectangle() {
-    addShape(newShape([{ x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 }, { x: 0.7, y: 0.7 }, { x: 0.3, y: 0.7 }]));
+    addShape(newShape(DEFAULT_RECT));
     setMode('select');
   }
 
@@ -499,6 +651,7 @@ export default function MappingStudio() {
 
   return (
     <div className="flex flex-col lg:flex-row gap-4 p-4">
+      <div ref={mediaHostRef} aria-hidden className="fixed left-0 top-0 w-px h-px overflow-hidden opacity-0 pointer-events-none" />
       {/* Scène */}
       <div className="flex-1 min-w-0 flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -521,6 +674,23 @@ export default function MappingStudio() {
           <span className="w-px h-6 bg-ink-2 mx-1" />
           <button className={btnGhost} onClick={openProjectorWindow}>⧉ Fenêtre projecteur</button>
           <button className={btnGhost} onClick={toggleFullscreen}>⛶ Plein écran</button>
+          {recording ? (
+            <button className={`${btn} border-danger/50 bg-danger/15 text-danger hover:bg-danger/25`} onClick={stopExport}>
+              ■ Arrêter et télécharger{' '}
+              <span className="font-numeric">
+                {formatTime(elapsedMs)}{recording.durationMs ? ` / ${formatTime(recording.durationMs)}` : ''}
+              </span>
+            </button>
+          ) : (
+            <button
+              className={btnGhost}
+              onClick={startExport}
+              disabled={shapes.length === 0}
+              title="Enregistre le résultat projeté (une boucle complète de la vidéo) et le télécharge"
+            >
+              ⤓ Exporter la vidéo
+            </button>
+          )}
           <select
             className="bg-ink-1 border border-ink-2 rounded-md px-2 py-1.5 font-mono text-[11px] text-ink-4"
             value={aspectKey}
@@ -540,9 +710,36 @@ export default function MappingStudio() {
 
         <div
           ref={wrapRef}
-          className={fullscreen ? 'w-screen h-screen bg-black flex items-center justify-center' : 'flex justify-center'}
-          style={fullscreen && !showHandles ? { cursor: 'none' } : undefined}
+          className={fullscreen ? 'relative w-screen h-screen bg-black flex items-center justify-center' : 'flex justify-center'}
+          style={fullscreen && !showHandles && !chromeVisible ? { cursor: 'none' } : undefined}
+          onPointerMove={fullscreen && !showHandles ? revealChrome : undefined}
+          onPointerDown={fullscreen && !showHandles ? revealChrome : undefined}
         >
+          {fullscreen && showHandles && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100vw-1.5rem)] flex flex-wrap items-center justify-center gap-2 rounded-lg border border-ink-2 bg-ink-0/90 p-2 backdrop-blur">
+              <button className={mode === 'draw' ? btnAccent : btnGhost} onClick={mode === 'draw' ? finishDraft : startDrawing}>
+                {mode === 'draw' ? `Terminer (${draft.length} pts)` : '✎ Dessiner une forme'}
+              </button>
+              <button className={btnGhost} onClick={addRectangle}>▭ Rectangle</button>
+              {selected && (
+                <button className={`${btn} border-danger/40 text-danger hover:bg-danger/10`} onClick={deleteSelected}>
+                  Supprimer
+                </button>
+              )}
+              <button className={btnAccent} onClick={() => { setShowHandles(false); setChromeVisible(false); }}>
+                ◉ Masquer les lignes
+              </button>
+              <button className={btnGhost} onClick={toggleFullscreen}>✕ Quitter</button>
+            </div>
+          )}
+          {fullscreen && !showHandles && chromeVisible && (
+            <button
+              className={`${btnGhost} absolute top-3 right-3 z-10 bg-ink-0/80`}
+              onClick={() => setShowHandles(true)}
+            >
+              ✎ Afficher les lignes
+            </button>
+          )}
           <div
             className={`relative bg-black ${fullscreen ? '' : 'rounded-md ring-1 ring-ink-2'}`}
             style={{ width: stageWidth, aspectRatio: String(aspect) }}
@@ -558,7 +755,11 @@ export default function MappingStudio() {
               viewBox={`0 0 ${VIEW_W} ${viewH}`}
               preserveAspectRatio="none"
               className="absolute inset-0 w-full h-full touch-none select-none"
-              style={{ cursor: mode === 'draw' ? 'crosshair' : 'default', opacity: overlayVisible ? 1 : 0 }}
+              style={{
+                cursor: mode === 'draw' ? 'crosshair' : 'default',
+                opacity: overlayVisible ? 1 : 0,
+                pointerEvents: overlayVisible ? 'auto' : 'none',
+              }}
               onPointerDown={onBackgroundDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
@@ -760,19 +961,16 @@ export default function MappingStudio() {
             {sources.map((s) => (
               <li key={s.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-ink-4 hover:bg-ink-2/40">
                 <span className="font-mono text-[10px] text-ink-3 w-4">{s.kind === 'video' ? '▶' : s.kind === 'image' ? '▣' : '#'}</span>
-                <span className="truncate flex-1" title={s.name}>{s.name}</span>
+                <button
+                  className="truncate flex-1 text-left hover:text-accent"
+                  title={selected ? `Projeter « ${s.name} » dans ${selected.name}` : `Projeter « ${s.name} » dans une nouvelle forme`}
+                  onClick={() => assignMedia(s.id)}
+                >
+                  {s.name}
+                </button>
                 {s.kind === 'video' && (
                   <button className="font-mono text-[10px] text-ink-3 hover:text-ink-4" onClick={() => toggleMute(s.id)} title="Son">
                     {s.muted ? '🔇' : '🔊'}
-                  </button>
-                )}
-                {selected && (
-                  <button
-                    className="font-mono text-[10px] text-accent hover:text-accent-glow"
-                    onClick={() => updateShape(selected.id, { sourceId: s.id })}
-                    title="Projeter dans la forme sélectionnée"
-                  >
-                    ↳
                   </button>
                 )}
                 {s.kind !== 'grid' && (
@@ -797,6 +995,10 @@ export default function MappingStudio() {
             <li>Remplacez la mire par votre vidéo.</li>
           </ol>
           <p className="mt-2">Gardez cet onglet ouvert (non réduit) : c’est lui qui calcule l’image envoyée au projecteur.</p>
+          <p className="mt-2">
+            « Exporter la vidéo » enregistre le résultat en temps réel (une boucle complète, son compris si une vidéo
+            n’est pas muette) puis télécharge le fichier. Restez sur cet onglet pendant l’enregistrement.
+          </p>
         </section>
       </aside>
     </div>
